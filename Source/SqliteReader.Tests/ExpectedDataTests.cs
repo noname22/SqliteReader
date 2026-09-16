@@ -14,11 +14,20 @@ public class ExpectedDataTests
         "wal-restarted",
     ];
 
-    [TestCaseSource(nameof(Databases))]
-    public async Task AllTablesMatchSqlite(string name)
+    private static IEnumerable<TestCaseData> DatabasesAndOpenModes() =>
+        Databases.SelectMany(name => new[]
+        {
+            new TestCaseData(name, false).SetName($"AllTablesMatchSqlite({name}, file)"),
+            new TestCaseData(name, true).SetName($"AllTablesMatchSqlite({name}, memory streams)"),
+        });
+
+    [TestCaseSource(nameof(DatabasesAndOpenModes))]
+    public async Task AllTablesMatchSqlite(string name, bool fromMemoryStreams)
     {
         var expected = LoadExpected(TestData.Path(name + ".expected.jsonl"));
-        await using var database = await SqliteDatabase.OpenAsync(TestData.Path(name + ".db"));
+        await using var database = fromMemoryStreams
+            ? await OpenFromMemoryAsync(TestData.Path(name + ".db"))
+            : await SqliteDatabase.OpenAsync(TestData.Path(name + ".db"));
 
         Assert.That(expected.Keys, Is.SubsetOf(database.Tables.Select(t => t.Name)));
 
@@ -35,6 +44,13 @@ public class ExpectedDataTests
 
             Assert.That(index, Is.EqualTo(expectedRows.Count), $"Row count of {table.Name}");
         }
+    }
+
+    /// <summary>Opens a database (and its log, if any) from memory streams, which aren't read through a file handle.</summary>
+    private static Task<SqliteDatabase> OpenFromMemoryAsync(string path)
+    {
+        var wal = File.Exists(path + "-wal") ? new MemoryStream(File.ReadAllBytes(path + "-wal")) : null;
+        return SqliteDatabase.OpenStreamAsync(new MemoryStream(File.ReadAllBytes(path)), wal);
     }
 
     [Test]

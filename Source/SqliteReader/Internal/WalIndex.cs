@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using Microsoft.Win32.SafeHandles;
 
 namespace SqliteReader.Internal;
 
@@ -7,7 +6,7 @@ namespace SqliteReader.Internal;
 /// An index of the committed frames in a write-ahead log. It is built by scanning the log, the same way SQLite
 /// recovers its wal-index, so the -shm file is never used.
 /// </summary>
-internal sealed class WalIndex : IDisposable
+internal sealed class WalIndex
 {
     public const int HeaderSize = 32;
     public const int FrameHeaderSize = 24;
@@ -16,12 +15,12 @@ internal sealed class WalIndex : IDisposable
 
     private const int ScanChunkBytes = 1 << 20;
 
-    private readonly SafeFileHandle _handle;
+    private readonly StreamSource _source;
     private readonly Dictionary<uint, long> _frames;
 
-    private WalIndex(SafeFileHandle handle, int pageSize, uint pageCount, Dictionary<uint, long> frames)
+    private WalIndex(StreamSource source, int pageSize, uint pageCount, Dictionary<uint, long> frames)
     {
-        _handle = handle;
+        _source = source;
         PageSize = pageSize;
         PageCount = pageCount;
         _frames = frames;
@@ -33,52 +32,16 @@ internal sealed class WalIndex : IDisposable
     public uint PageCount { get; }
 
     /// <summary>
-    /// Opens and indexes a write-ahead log. Returns null if the log doesn't exist or holds no committed transactions.
+    /// Indexes a write-ahead log. Returns null if the log holds no committed transactions or has an invalid header,
+    /// in which case SQLite ignores it too.
     /// </summary>
-    public static async Task<WalIndex?> OpenAsync(string path, CancellationToken cancellationToken)
-    {
-        if (!File.Exists(path))
-        {
-            return null;
-        }
-
-        var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
-            FileOptions.Asynchronous);
-        try
-        {
-            var index = await ScanAsync(handle, cancellationToken).ConfigureAwait(false);
-            if (index is null)
-            {
-                handle.Dispose();
-            }
-
-            return index;
-        }
-        catch
-        {
-            handle.Dispose();
-            throw;
-        }
-    }
+    public static Task<WalIndex?> OpenAsync(StreamSource source, CancellationToken cancellationToken) =>
+        ScanAsync(source, cancellationToken);
 
     public bool TryGetFrame(uint pageNumber, out long dataOffset) => _frames.TryGetValue(pageNumber, out dataOffset);
 
-    public async ValueTask ReadAsync(long offset, Memory<byte> destination, CancellationToken cancellationToken)
-    {
-        while (destination.Length > 0)
-        {
-            int read = await RandomAccess.ReadAsync(_handle, destination, offset, cancellationToken).ConfigureAwait(false);
-            if (read == 0)
-            {
-                throw new SqliteFormatException($"Unexpected end of write-ahead log at offset {offset}.");
-            }
-
-            destination = destination[read..];
-            offset += read;
-        }
-    }
-
-    public void Dispose() => _handle.Dispose();
+    public ValueTask ReadAsync(long offset, Memory<byte> destination, CancellationToken cancellationToken) =>
+        _source.ReadExactlyAsync(offset, destination, "write-ahead log", cancellationToken);
 
     /// <summary>
     /// The WAL checksum: for each 8-byte chunk with 32-bit words a and b, <c>s1 += a + s2; s2 += b + s1</c>.
@@ -104,16 +67,16 @@ internal sealed class WalIndex : IDisposable
         }
     }
 
-    private static async Task<WalIndex?> ScanAsync(SafeFileHandle handle, CancellationToken cancellationToken)
+    private static async Task<WalIndex?> ScanAsync(StreamSource source, CancellationToken cancellationToken)
     {
-        long length = RandomAccess.GetLength(handle);
+        long length = source.Length;
         if (length <= HeaderSize)
         {
             return null;
         }
 
         var header = new byte[HeaderSize];
-        if (await ReadFullyAsync(handle, header, 0, cancellationToken).ConfigureAwait(false) < HeaderSize)
+        if (await source.ReadAsync(0, header, cancellationToken).ConfigureAwait(false) < HeaderSize)
         {
             return null;
         }
@@ -137,7 +100,7 @@ internal sealed class WalIndex : IDisposable
         {
             int count = (int)Math.Min(framesPerChunk, frameCount - frame);
             long chunkOffset = HeaderSize + frame * frameSize;
-            int read = await ReadFullyAsync(handle, buffer.AsMemory(0, count * frameSize), chunkOffset, cancellationToken)
+            int read = await source.ReadAsync(chunkOffset, buffer.AsMemory(0, count * frameSize), cancellationToken)
                 .ConfigureAwait(false);
             count = read / frameSize;
 
@@ -171,7 +134,7 @@ internal sealed class WalIndex : IDisposable
 
         return Finish();
 
-        WalIndex? Finish() => pageCount == 0 ? null : new WalIndex(handle, pageSize, pageCount, committed);
+        WalIndex? Finish() => pageCount == 0 ? null : new WalIndex(source, pageSize, pageCount, committed);
     }
 
     /// <summary>Returns the scan state, or null if the header is invalid and the log must be ignored.</summary>
@@ -208,25 +171,6 @@ internal sealed class WalIndex : IDisposable
             S1 = s1,
             S2 = s2,
         };
-    }
-
-    private static async ValueTask<int> ReadFullyAsync(SafeFileHandle handle, Memory<byte> destination, long offset,
-        CancellationToken cancellationToken)
-    {
-        int total = 0;
-        while (total < destination.Length)
-        {
-            int read = await RandomAccess.ReadAsync(handle, destination[total..], offset + total, cancellationToken)
-                .ConfigureAwait(false);
-            if (read == 0)
-            {
-                break;
-            }
-
-            total += read;
-        }
-
-        return total;
     }
 
     private sealed class ScanState

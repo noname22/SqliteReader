@@ -7,8 +7,8 @@ namespace SqliteReader;
 /// A read-only SQLite 3 database. Rows are streamed from disk on demand.
 /// </summary>
 /// <remarks>
-/// The database file is opened read-only. Committed transactions in a write-ahead log (<c>-wal</c> file) are
-/// included; the log is indexed once when the database is opened. No locks are taken, so the database must not be
+/// Files are opened read-only. Committed transactions in a write-ahead log (<c>-wal</c> file) are included; the log
+/// is indexed once when the database is opened. No locks are taken, so the database must not be
 /// written to or checkpointed while it is being read. Databases with a hot rollback journal are rejected.
 /// Instances are thread-safe; several tables may be enumerated concurrently.
 /// </remarks>
@@ -29,23 +29,82 @@ public sealed class SqliteDatabase : IAsyncDisposable, IDisposable
     public IReadOnlyList<SqliteTable> Tables => _tables;
 
     /// <summary>
-    /// Opens a database file for reading and loads its schema.
+    /// Opens a database file for reading and loads its schema. A write-ahead log (<c>-wal</c> file) next to the
+    /// database is included.
     /// </summary>
     /// <exception cref="SqliteFormatException">The file is not a valid SQLite 3 database.</exception>
     /// <exception cref="NotSupportedException">The database has a hot rollback journal, or a file format version this reader doesn't know.</exception>
-    public static async Task<SqliteDatabase> OpenAsync(string path, CancellationToken cancellationToken = default)
+    public static Task<SqliteDatabase> OpenAsync(string path, CancellationToken cancellationToken = default) =>
+        OpenAsync(path, useWalFile: true, cancellationToken);
+
+    /// <summary>
+    /// Opens a database file for reading and loads its schema.
+    /// </summary>
+    /// <param name="path">The database file.</param>
+    /// <param name="useWalFile">
+    /// Whether to include a write-ahead log (<c>-wal</c> file) next to the database. If false, only the database
+    /// file is read, so transactions that haven't been checkpointed yet are missing.
+    /// </param>
+    /// <param name="cancellationToken">Cancels opening.</param>
+    /// <exception cref="SqliteFormatException">The file is not a valid SQLite 3 database.</exception>
+    /// <exception cref="NotSupportedException">The database has a hot rollback journal, or a file format version this reader doesn't know.</exception>
+    public static async Task<SqliteDatabase> OpenAsync(string path, bool useWalFile,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(path);
-        var file = await DatabaseFile.OpenAsync(path, cancellationToken).ConfigureAwait(false);
-        var database = new SqliteDatabase(file);
+        var database = DatabaseFile.OpenFile(path);
+        FileStream? wal = null;
         try
         {
-            await database.LoadSchemaAsync(cancellationToken).ConfigureAwait(false);
-            return database;
+            await DatabaseFile.CheckHotJournalAsync(path, cancellationToken).ConfigureAwait(false);
+            wal = useWalFile ? DatabaseFile.OpenFileIfExists(path + "-wal") : null;
         }
         catch
         {
             database.Dispose();
+            throw;
+        }
+
+        return await OpenStreamAsync(database, wal, leaveOpen: false, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Opens a database from streams and loads its schema.
+    /// </summary>
+    /// <param name="database">The database file contents. Must be readable and seekable.</param>
+    /// <param name="wal">
+    /// The write-ahead log (<c>-wal</c> file) contents, if any. Must be readable and seekable.
+    /// </param>
+    /// <param name="leaveOpen">
+    /// If false, the streams are disposed when the database is disposed, or when opening fails.
+    /// </param>
+    /// <param name="cancellationToken">Cancels opening.</param>
+    /// <remarks>
+    /// Reads don't depend on or preserve the stream positions. <see cref="FileStream"/>s are read through their
+    /// handles, so concurrent enumerations don't block each other; reads from other streams are serialized.
+    /// Hot rollback journals can't be detected, since only the given streams are read.
+    /// </remarks>
+    /// <exception cref="ArgumentException">A stream isn't readable and seekable.</exception>
+    /// <exception cref="SqliteFormatException">The stream doesn't contain a valid SQLite 3 database.</exception>
+    /// <exception cref="NotSupportedException">The database uses a file format version this reader doesn't know.</exception>
+    public static async Task<SqliteDatabase> OpenStreamAsync(Stream database, Stream? wal = null, bool leaveOpen = false,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var file = await DatabaseFile.OpenAsync(database, wal, leaveOpen, cancellationToken).ConfigureAwait(false);
+            var result = new SqliteDatabase(file);
+            await result.LoadSchemaAsync(cancellationToken).ConfigureAwait(false);
+            return result;
+        }
+        catch
+        {
+            if (!leaveOpen)
+            {
+                database?.Dispose();
+                wal?.Dispose();
+            }
+
             throw;
         }
     }

@@ -22,6 +22,16 @@ await foreach (SqliteRow row in db.ReadTableAsync("FILE"))
 }
 ```
 
+Pass `useWalFile: false` to `OpenAsync` to read only the database file and ignore a `-wal` file next to it.
+Databases can also be read from any readable, seekable streams, for example in memory:
+
+```csharp
+await using var db = await SqliteDatabase.OpenStreamAsync(databaseStream, walStream /* or null */);
+```
+
+The streams are disposed together with the database unless `leaveOpen: true` is passed. `FileStream`s are read
+through their file handle, so several tables can be read at the same time; reads from other streams take turns.
+
 - Rows are returned in rowid order, or in primary key order for WITHOUT ROWID tables.
 - Supported: all page sizes, UTF-8 and UTF-16 databases, overflow pages, auto-vacuum, INTEGER PRIMARY KEY
   rowid aliases, columns added with `ALTER TABLE ADD COLUMN` (their constant defaults are used), STRICT tables and
@@ -31,8 +41,9 @@ await foreach (SqliteRow row in db.ReadTableAsync("FILE"))
 - Corrupt or malicious files fail with `SqliteFormatException`. Like SQLite, values larger than 1,000,000,000
   bytes are rejected.
 - The files are opened read-only and no locks are taken, so the database must not be written to or checkpointed
-  while it is being read. A database with a hot rollback journal throws `NotSupportedException`; open it once with
-  SQLite to recover it first.
+  while it is being read. When opening a file, a hot rollback journal next to it throws `NotSupportedException`;
+  open the database once with SQLite to recover it first. `OpenStreamAsync` only sees the streams it is given, so
+  it can't detect a hot journal.
 
 ## Building and testing
 
