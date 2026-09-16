@@ -10,6 +10,27 @@
     <Description>A simple, read-only sqlite3 database reader in pure managed .NET.</Description>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <Version>1.0.0</Version>
+    <PackageId>SqliteReader</PackageId>
+    <Authors>Fredrik Hultin</Authors>
+    <Copyright>Copyright 2026 Fredrik Hultin</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>sqlite;sqlite3;database;reader;async;managed</PackageTags>
+    <RepositoryUrl>https://github.com/noname22/SqliteReader</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/noname22/SqliteReader</PackageProjectUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="..\..\LICENSE.txt" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="SqliteReader.Tests" />
   </ItemGroup>
