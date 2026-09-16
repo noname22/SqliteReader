@@ -98,6 +98,11 @@ public class CreateTableParserTests
     [TestCase("x DEFAULT 'it''s'", "it's")]
     [TestCase("x NOT NULL DEFAULT -9223372036854775808", long.MinValue)]
     [TestCase("x", null)]
+    [TestCase("x INTEGER DEFAULT 0x1FFFFFFFFFFFFFFFFF", null)]
+    [TestCase("x INTEGER DEFAULT (0x1FFFFFFFFFFFFFFFFF)", null)]
+    [TestCase("x DEFAULT 1.2.3", null)]
+    [TestCase("x DEFAULT X'ABC'", null)]
+    [TestCase("x DEFAULT X'GG'", null)]
     public void Parse_DefaultValues(string column, object? expected)
     {
         var table = CreateTableParser.Parse($"CREATE TABLE t({column})");

@@ -146,6 +146,17 @@ INSERT INTO "CREATE TABLE fake(x)" VALUES ('ok');
 SQL
 dump_all schema.db
 
+# A small database that CorruptionTests modifies: 'big' is a single row whose payload spills onto an overflow
+# chain, and 'tree' is deep enough to have interior pages below the root.
+sqlite3 corruptible.db <<'SQL'
+PRAGMA page_size = 512;
+CREATE TABLE big(id INTEGER PRIMARY KEY, v BLOB);
+INSERT INTO big VALUES (1, zeroblob(20000));
+CREATE TABLE tree(id INTEGER PRIMARY KEY, v TEXT);
+INSERT INTO tree(v) SELECT printf('%.*c', 40, 'x') FROM generate_series(1, 2000);
+SQL
+dump_all corruptible.db
+
 # wal_db <name> <page size> <sql>: creates <name>.db with an un-checkpointed <name>.db-wal holding the effects of
 # <sql>. The copies are taken while the connection is open, since sqlite3 checkpoints and deletes the log when it
 # closes. Never open the resulting database with sqlite3, for the same reason. The expected data comes from running

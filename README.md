@@ -28,6 +28,8 @@ await foreach (SqliteRow row in db.ReadTableAsync("FILE"))
   generated columns. VIRTUAL generated columns are not stored in the file and are returned as `null`.
 - Databases in WAL mode are supported: committed transactions in the `-wal` file are included. The log is indexed
   when the database is opened (the `-shm` file is not used), and later changes to it are not seen.
+- Corrupt or malicious files fail with `SqliteFormatException`. Like SQLite, values larger than 1,000,000,000
+  bytes are rejected.
 - The files are opened read-only and no locks are taken, so the database must not be written to or checkpointed
   while it is being read. A database with a hot rollback journal throws `NotSupportedException`; open it once with
   SQLite to recover it first.

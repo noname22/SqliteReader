@@ -28,9 +28,11 @@ internal static class BTreeCursor
         var reader = new PageReader(file);
         var buffers = new List<byte[]>();
         var stack = new Stack<Frame>();
-        byte[]? overflowPage = null;
+        var visited = new PageSet(file.PageCount);
+        var overflow = new OverflowState();
 
-        stack.Push(await LoadFrameAsync(reader, rootPage, 0, buffers, isIndex, cancellationToken).ConfigureAwait(false));
+        stack.Push(await LoadFrameAsync(reader, rootPage, 0, buffers, visited, isIndex, cancellationToken)
+            .ConfigureAwait(false));
 
         while (stack.Count > 0)
         {
@@ -45,15 +47,14 @@ internal static class BTreeCursor
                     continue;
                 }
 
-                var cell = ParseCell(frame, frame.Next++, file.Header!.UsableSize);
+                var cell = ParseCell(frame, frame.Next++, file);
                 if (cell.OverflowPage == 0)
                 {
                     yield return decoder(cell.RowId, frame.Buffer.AsSpan(cell.LocalOffset, cell.LocalSize));
                 }
                 else
                 {
-                    overflowPage ??= new byte[file.PageSize];
-                    yield return await DecodeOverflowAsync(reader, frame.Buffer, cell, overflowPage, decoder,
+                    yield return await DecodeOverflowAsync(reader, frame.Buffer, cell, overflow, decoder,
                         cancellationToken).ConfigureAwait(false);
                 }
 
@@ -80,20 +81,19 @@ internal static class BTreeCursor
                     throw new SqliteFormatException($"B-tree rooted at page {rootPage} is too deep; the database is corrupt.");
                 }
 
-                stack.Push(await LoadFrameAsync(reader, child, stack.Count, buffers, isIndex, cancellationToken)
+                stack.Push(await LoadFrameAsync(reader, child, stack.Count, buffers, visited, isIndex, cancellationToken)
                     .ConfigureAwait(false));
             }
             else if (isIndex)
             {
-                var cell = ParseCell(frame, cellIndex, file.Header!.UsableSize);
+                var cell = ParseCell(frame, cellIndex, file);
                 if (cell.OverflowPage == 0)
                 {
                     yield return decoder(0, frame.Buffer.AsSpan(cell.LocalOffset, cell.LocalSize));
                 }
                 else
                 {
-                    overflowPage ??= new byte[file.PageSize];
-                    yield return await DecodeOverflowAsync(reader, frame.Buffer, cell, overflowPage, decoder,
+                    yield return await DecodeOverflowAsync(reader, frame.Buffer, cell, overflow, decoder,
                         cancellationToken).ConfigureAwait(false);
                 }
             }
@@ -101,8 +101,16 @@ internal static class BTreeCursor
     }
 
     private static async ValueTask<Frame> LoadFrameAsync(PageReader reader, uint pageNumber, int depth,
-        List<byte[]> buffers, bool isIndex, CancellationToken cancellationToken)
+        List<byte[]> buffers, PageSet visited, bool isIndex, CancellationToken cancellationToken)
     {
+        // Every b-tree page has exactly one parent. A page reached twice means the tree is corrupt; without this
+        // check a crafted file could make the scan revisit pages exponentially many times, or forever.
+        reader.File.ValidatePageNumber(pageNumber);
+        if (!visited.Add(pageNumber))
+        {
+            throw new SqliteFormatException($"Page {pageNumber} is referenced more than once; the database is corrupt.");
+        }
+
         if (depth == buffers.Count)
         {
             buffers.Add(new byte[reader.File.PageSize]);
@@ -110,11 +118,12 @@ internal static class BTreeCursor
 
         byte[] buffer = buffers[depth];
         await reader.ReadPageAsync(pageNumber, buffer, cancellationToken).ConfigureAwait(false);
-        return Frame.Parse(buffer, pageNumber, isIndex);
+        return Frame.Parse(buffer, pageNumber, isIndex, reader.File.Header!.UsableSize);
     }
 
-    private static Cell ParseCell(Frame frame, int index, int usableSize)
+    private static Cell ParseCell(Frame frame, int index, DatabaseFile file)
     {
+        int usableSize = file.Header!.UsableSize;
         var page = frame.Buffer.AsSpan(0, usableSize);
         int offset = frame.CellPointer(index);
         int pos = offset;
@@ -150,6 +159,16 @@ internal static class BTreeCursor
         }
 
         bool hasOverflow = localSize < payloadSize;
+
+        // The rest of the payload needs this many distinct overflow pages, which the file must have. Checking this
+        // first keeps a bogus size from causing a long read of a looping or foreign page chain.
+        long overflowPages = (payloadSize - localSize + usableSize - 5) / (usableSize - 4);
+        if (overflowPages >= file.PageCount)
+        {
+            throw new SqliteFormatException(
+                $"Payload size {payloadSize} of cell {index} on page {frame.PageNumber} needs more overflow pages than the database has.");
+        }
+
         if (pos + localSize + (hasOverflow ? 4 : 0) > usableSize)
         {
             throw new SqliteFormatException($"Cell {index} overflows page {frame.PageNumber}.");
@@ -165,26 +184,44 @@ internal static class BTreeCursor
     }
 
     private static async ValueTask<T> DecodeOverflowAsync<T>(PageReader reader, byte[] page, Cell cell,
-        byte[] overflowPage, PayloadDecoder<T> decoder, CancellationToken cancellationToken)
+        OverflowState state, PayloadDecoder<T> decoder, CancellationToken cancellationToken)
     {
-        byte[] payload = ArrayPool<byte>.Shared.Rent(cell.PayloadSize);
+        var file = reader.File;
+        int chunkSize = file.Header!.UsableSize - 4;
+        state.OverflowPage ??= new byte[file.PageSize];
+        state.ChainPages.Clear();
+
+        // Grow the buffer as the chain is read, so a bogus payload size can't force a large allocation up front.
+        byte[] payload = ArrayPool<byte>.Shared.Rent(Math.Min(cell.PayloadSize, cell.LocalSize + 16 * chunkSize));
         try
         {
             Buffer.BlockCopy(page, cell.LocalOffset, payload, 0, cell.LocalSize);
             int filled = cell.LocalSize;
-            int chunkSize = reader.File.Header!.UsableSize - 4;
             uint next = cell.OverflowPage;
             while (filled < cell.PayloadSize)
             {
                 if (next == 0)
                 {
-                    throw new SqliteFormatException("Overflow chain ends prematurely.");
+                    throw new SqliteFormatException("Overflow chain ends prematurely; the database is corrupt.");
                 }
 
-                await reader.ReadPageAsync(next, overflowPage, cancellationToken).ConfigureAwait(false);
-                next = BinaryPrimitives.ReadUInt32BigEndian(overflowPage);
+                if (!state.ChainPages.Add(next))
+                {
+                    throw new SqliteFormatException($"Overflow chain loops at page {next}; the database is corrupt.");
+                }
+
+                await reader.ReadPageAsync(next, state.OverflowPage, cancellationToken).ConfigureAwait(false);
+                next = BinaryPrimitives.ReadUInt32BigEndian(state.OverflowPage);
                 int count = Math.Min(chunkSize, cell.PayloadSize - filled);
-                Buffer.BlockCopy(overflowPage, 4, payload, filled, count);
+                if (filled + count > payload.Length)
+                {
+                    byte[] larger = ArrayPool<byte>.Shared.Rent((int)Math.Min(cell.PayloadSize, 2L * payload.Length));
+                    Buffer.BlockCopy(payload, 0, larger, 0, filled);
+                    ArrayPool<byte>.Shared.Return(payload);
+                    payload = larger;
+                }
+
+                Buffer.BlockCopy(state.OverflowPage, 4, payload, filled, count);
                 filled += count;
             }
 
@@ -196,11 +233,47 @@ internal static class BTreeCursor
         }
     }
 
+    /// <summary>Reusable per-scan buffers for reading overflow chains.</summary>
+    private sealed class OverflowState
+    {
+        public byte[]? OverflowPage { get; set; }
+
+        public HashSet<uint> ChainPages { get; } = [];
+    }
+
+    /// <summary>
+    /// A set of page numbers, stored as a bitmap whose segments are allocated on first use, so scans of small tables
+    /// in huge databases stay cheap.
+    /// </summary>
+    private sealed class PageSet(uint pageCount)
+    {
+        private const int SegmentBits = 1 << 18;
+
+        private readonly ulong[]?[] _segments = new ulong[(pageCount >> 18) + 1][];
+
+        /// <summary>Adds a page number (1..pageCount); returns false if it was already present.</summary>
+        public bool Add(uint pageNumber)
+        {
+            var segment = _segments[pageNumber >> 18] ??= new ulong[SegmentBits / 64];
+            int bit = (int)(pageNumber & (SegmentBits - 1));
+            ulong mask = 1UL << (bit & 63);
+            ref ulong word = ref segment[bit >> 6];
+            if ((word & mask) != 0)
+            {
+                return false;
+            }
+
+            word |= mask;
+            return true;
+        }
+    }
+
     private readonly record struct Cell(long RowId, int PayloadSize, int LocalOffset, int LocalSize, uint OverflowPage);
 
     private sealed class Frame
     {
         private int _headerOffset;
+        private int _usableSize;
 
         public required byte[] Buffer { get; init; }
 
@@ -217,7 +290,7 @@ internal static class BTreeCursor
         /// <summary>Iteration state: next cell (leaf) or next step (interior).</summary>
         public int Next { get; set; }
 
-        public static Frame Parse(byte[] buffer, uint pageNumber, bool isIndex)
+        public static Frame Parse(byte[] buffer, uint pageNumber, bool isIndex, int usableSize)
         {
             int headerOffset = pageNumber == 1 ? DatabaseHeader.Size : 0;
             var header = buffer.AsSpan(headerOffset);
@@ -232,7 +305,7 @@ internal static class BTreeCursor
             bool leaf = type is TableLeaf or IndexLeaf;
             int headerSize = leaf ? 8 : 12;
             int cellCount = BinaryPrimitives.ReadUInt16BigEndian(header[3..]);
-            if (headerOffset + headerSize + cellCount * 2 > buffer.Length)
+            if (headerOffset + headerSize + cellCount * 2 > usableSize)
             {
                 throw new SqliteFormatException($"Invalid cell count {cellCount} on page {pageNumber}.");
             }
@@ -245,13 +318,15 @@ internal static class BTreeCursor
                 CellCount = cellCount,
                 RightChild = leaf ? 0 : BinaryPrimitives.ReadUInt32BigEndian(header[8..]),
                 _headerOffset = headerOffset + headerSize,
+                _usableSize = usableSize,
             };
         }
 
         public int CellPointer(int index)
         {
             int pointer = BinaryPrimitives.ReadUInt16BigEndian(Buffer.AsSpan(_headerOffset + index * 2));
-            if (pointer < _headerOffset + CellCount * 2 || pointer >= Buffer.Length)
+            // Like SQLite, a cell must start at least 4 bytes before the end of the usable area.
+            if (pointer < _headerOffset + CellCount * 2 || pointer > _usableSize - 4)
             {
                 throw new SqliteFormatException($"Invalid cell pointer {pointer} on page {PageNumber}.");
             }

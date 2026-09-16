@@ -118,6 +118,11 @@ internal static class CreateTableParser
             }
         }
 
+        if (table.Columns.Count == 0)
+        {
+            throw new SqliteFormatException($"Table definition has no columns: {sql}");
+        }
+
         foreach (var column in table.Columns)
         {
             column.IsStrict = table.IsStrict;
@@ -384,13 +389,13 @@ internal static class CreateTableParser
             {
                 case SqlTokenKind.Number:
                     column.DefaultValue = ParseNumberLiteral(token.Text, negative);
-                    return true;
+                    return column.DefaultValue is not null;
                 case SqlTokenKind.String or SqlTokenKind.QuotedIdentifier:
                     column.DefaultValue = token.Text;
                     return true;
                 case SqlTokenKind.Blob:
-                    column.DefaultValue = Convert.FromHexString(token.Text);
-                    return true;
+                    column.DefaultValue = TryParseHex(token.Text);
+                    return column.DefaultValue is not null;
                 case SqlTokenKind.Word when token.IsWord("NULL"):
                     column.DefaultValue = null;
                     return true;
@@ -412,21 +417,26 @@ internal static class CreateTableParser
         }
     }
 
-    private static object ParseNumberLiteral(string text, bool negative)
+    /// <summary>Parses a numeric literal; returns null if it is malformed (SQLite would have rejected it).</summary>
+    private static object? ParseNumberLiteral(string text, bool negative)
     {
         text = text.Replace("_", "", StringComparison.Ordinal);
         if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
         {
-            long hex = unchecked((long)ulong.Parse(text.AsSpan(2), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture));
-            return negative ? unchecked(-hex) : hex;
+            if (!ulong.TryParse(text.AsSpan(2), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out ulong hex))
+            {
+                return null;
+            }
+
+            return negative ? unchecked(-(long)hex) : unchecked((long)hex);
         }
 
-        if (TryParseNumber((negative ? "-" : "") + text, out var value))
-        {
-            return value;
-        }
+        return TryParseNumber((negative ? "-" : "") + text, out var value) ? value : null;
+    }
 
-        throw new SqliteFormatException($"Invalid numeric literal '{text}'.");
+    private static byte[]? TryParseHex(string text)
+    {
+        return text.Length % 2 == 0 && text.All(char.IsAsciiHexDigit) ? Convert.FromHexString(text) : null;
     }
 
     private static bool TryParseNumber(string text, out object value)
