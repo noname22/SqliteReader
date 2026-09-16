@@ -9,9 +9,6 @@ namespace SqliteReader.Internal;
 /// </summary>
 internal static class RecordDecoder
 {
-    /// <summary>SQLite's default limit on the size of a single string or blob (SQLITE_MAX_LENGTH).</summary>
-    public const int MaxValueLength = 1_000_000_000;
-
     /// <summary>
     /// Decodes fields of <paramref name="record"/> and passes each one to <paramref name="sink"/> together with its
     /// index. Stops after <paramref name="maxFields"/> fields. Returns the number of fields decoded.
@@ -61,9 +58,7 @@ internal static class RecordDecoder
         5 => 6,
         6 or 7 => 8,
         10 or 11 => throw new SqliteFormatException($"Reserved serial type {serialType}."),
-        < 0 => throw new SqliteFormatException($"Invalid serial type {serialType}."),
-        > 2L * MaxValueLength + 13 => throw new SqliteFormatException(
-            $"Value of {(serialType - 12) / 2} bytes exceeds the limit of {MaxValueLength} bytes."),
+        < 0 or > 2L * int.MaxValue + 13 => throw new SqliteFormatException($"Invalid serial type {serialType}."),
         _ => (int)((serialType - 12) / 2),
     };
 

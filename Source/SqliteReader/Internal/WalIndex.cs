@@ -35,8 +35,18 @@ internal sealed class WalIndex
     /// Indexes a write-ahead log. Returns null if the log holds no committed transactions or has an invalid header,
     /// in which case SQLite ignores it too.
     /// </summary>
-    public static Task<WalIndex?> OpenAsync(StreamSource source, CancellationToken cancellationToken) =>
-        ScanAsync(source, cancellationToken);
+    /// <exception cref="NotSupportedException">The log is larger than <paramref name="maxSize"/>.</exception>
+    public static Task<WalIndex?> OpenAsync(StreamSource source, long? maxSize, CancellationToken cancellationToken)
+    {
+        if (source.Length > maxSize)
+        {
+            throw new NotSupportedException(
+                $"The write-ahead log is {source.Length} bytes, more than the limit of {maxSize} bytes " +
+                $"({nameof(SqliteDatabaseOptions)}.{nameof(SqliteDatabaseOptions.MaxWalSize)}).");
+        }
+
+        return ScanAsync(source, cancellationToken);
+    }
 
     public bool TryGetFrame(uint pageNumber, out long dataOffset) => _frames.TryGetValue(pageNumber, out dataOffset);
 

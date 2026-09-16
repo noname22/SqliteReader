@@ -64,7 +64,7 @@ public class RecordDecoderTests
     [TestCase(new byte[] { 0 }, TestName = "Header size smaller than its own varint")]
     [TestCase(new byte[] { 4, 0xFA, 0x89, 0x0A }, TestName = "Blob larger than the record")]
     [TestCase(new byte[] { 6, 0x90, 0x80, 0x80, 0x80, 0x0D }, TestName = "Text larger than int.MaxValue")]
-    [TestCase(new byte[] { 6, 0x87, 0xB9, 0xD6, 0xA8, 0x0E }, TestName = "Blob larger than the value size limit")]
+    [TestCase(new byte[] { 6, 0x87, 0xB9, 0xD6, 0xA8, 0x0E }, TestName = "Blob of over a gigabyte in a small record")]
     public void Decode_RejectsCorruptRecords(byte[] record)
     {
         Assert.Throws<SqliteFormatException>(() => RecordDecoder.Decode(record, Encoding.UTF8));

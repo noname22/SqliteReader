@@ -169,6 +169,13 @@ internal static class BTreeCursor
                 $"Payload size {payloadSize} of cell {index} on page {frame.PageNumber} needs more overflow pages than the database has.");
         }
 
+        if (payloadSize > file.MaxRowSize)
+        {
+            throw new NotSupportedException(
+                $"Row of {payloadSize} bytes on page {frame.PageNumber} exceeds the limit of {file.MaxRowSize} bytes " +
+                $"({nameof(SqliteDatabaseOptions)}.{nameof(SqliteDatabaseOptions.MaxRowSize)}).");
+        }
+
         if (pos + localSize + (hasOverflow ? 4 : 0) > usableSize)
         {
             throw new SqliteFormatException($"Cell {index} overflows page {frame.PageNumber}.");

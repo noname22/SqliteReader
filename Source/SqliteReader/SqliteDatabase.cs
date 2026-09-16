@@ -29,35 +29,40 @@ public sealed class SqliteDatabase : IAsyncDisposable, IDisposable
     public IReadOnlyList<SqliteTable> Tables => _tables;
 
     /// <summary>
-    /// Opens a database file for reading and loads its schema. A write-ahead log (<c>-wal</c> file) next to the
-    /// database is included.
+    /// Opens a database file for reading and loads its schema, with default options. A write-ahead log (<c>-wal</c>
+    /// file) next to the database is included.
     /// </summary>
     /// <exception cref="SqliteFormatException">The file is not a valid SQLite 3 database.</exception>
     /// <exception cref="NotSupportedException">The database has a hot rollback journal, or a file format version this reader doesn't know.</exception>
     public static Task<SqliteDatabase> OpenAsync(string path, CancellationToken cancellationToken = default) =>
-        OpenAsync(path, useWalFile: true, cancellationToken);
+        OpenAsync(path, null, cancellationToken);
 
     /// <summary>
     /// Opens a database file for reading and loads its schema.
     /// </summary>
     /// <param name="path">The database file.</param>
-    /// <param name="useWalFile">
-    /// Whether to include a write-ahead log (<c>-wal</c> file) next to the database. If false, only the database
-    /// file is read, so transactions that haven't been checkpointed yet are missing.
-    /// </param>
+    /// <param name="options">Options, or null for <see cref="SqliteDatabaseOptions.Default"/>.</param>
     /// <param name="cancellationToken">Cancels opening.</param>
     /// <exception cref="SqliteFormatException">The file is not a valid SQLite 3 database.</exception>
-    /// <exception cref="NotSupportedException">The database has a hot rollback journal, or a file format version this reader doesn't know.</exception>
-    public static async Task<SqliteDatabase> OpenAsync(string path, bool useWalFile,
+    /// <exception cref="NotSupportedException">
+    /// The database has a hot rollback journal, uses a file format version this reader doesn't know, or exceeds a
+    /// limit in <paramref name="options"/>.
+    /// </exception>
+    public static async Task<SqliteDatabase> OpenAsync(string path, SqliteDatabaseOptions? options,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(path);
+        options ??= SqliteDatabaseOptions.Default;
         var database = DatabaseFile.OpenFile(path);
         FileStream? wal = null;
         try
         {
-            await DatabaseFile.CheckHotJournalAsync(path, cancellationToken).ConfigureAwait(false);
-            wal = useWalFile ? DatabaseFile.OpenFileIfExists(path + "-wal") : null;
+            if (options.CheckHotJournal)
+            {
+                await DatabaseFile.CheckHotJournalAsync(path, cancellationToken).ConfigureAwait(false);
+            }
+
+            wal = options.UseWalFile ? DatabaseFile.OpenFileIfExists(path + "-wal") : null;
         }
         catch
         {
@@ -65,7 +70,7 @@ public sealed class SqliteDatabase : IAsyncDisposable, IDisposable
             throw;
         }
 
-        return await OpenStreamAsync(database, wal, leaveOpen: false, cancellationToken).ConfigureAwait(false);
+        return await OpenStreamAsync(database, wal, options, leaveOpen: false, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -74,6 +79,10 @@ public sealed class SqliteDatabase : IAsyncDisposable, IDisposable
     /// <param name="database">The database file contents. Must be readable and seekable.</param>
     /// <param name="wal">
     /// The write-ahead log (<c>-wal</c> file) contents, if any. Must be readable and seekable.
+    /// </param>
+    /// <param name="options">
+    /// Options, or null for <see cref="SqliteDatabaseOptions.Default"/>. The options about files next to the
+    /// database don't apply.
     /// </param>
     /// <param name="leaveOpen">
     /// If false, the streams are disposed when the database is disposed, or when opening fails.
@@ -86,13 +95,17 @@ public sealed class SqliteDatabase : IAsyncDisposable, IDisposable
     /// </remarks>
     /// <exception cref="ArgumentException">A stream isn't readable and seekable.</exception>
     /// <exception cref="SqliteFormatException">The stream doesn't contain a valid SQLite 3 database.</exception>
-    /// <exception cref="NotSupportedException">The database uses a file format version this reader doesn't know.</exception>
-    public static async Task<SqliteDatabase> OpenStreamAsync(Stream database, Stream? wal = null, bool leaveOpen = false,
-        CancellationToken cancellationToken = default)
+    /// <exception cref="NotSupportedException">
+    /// The database uses a file format version this reader doesn't know, or exceeds a limit in
+    /// <paramref name="options"/>.
+    /// </exception>
+    public static async Task<SqliteDatabase> OpenStreamAsync(Stream database, Stream? wal = null,
+        SqliteDatabaseOptions? options = null, bool leaveOpen = false, CancellationToken cancellationToken = default)
     {
         try
         {
-            var file = await DatabaseFile.OpenAsync(database, wal, leaveOpen, cancellationToken).ConfigureAwait(false);
+            var file = await DatabaseFile.OpenAsync(database, wal, options ?? SqliteDatabaseOptions.Default, leaveOpen,
+                cancellationToken).ConfigureAwait(false);
             var result = new SqliteDatabase(file);
             await result.LoadSchemaAsync(cancellationToken).ConfigureAwait(false);
             return result;

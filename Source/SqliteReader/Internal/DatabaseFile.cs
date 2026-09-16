@@ -13,8 +13,10 @@ internal sealed class DatabaseFile : IDisposable
     private readonly Stream[] _ownedStreams;
     private bool _disposed;
 
-    private DatabaseFile(StreamSource? source, WalIndex? wal, DatabaseHeader? header, uint pageCount, Stream[] ownedStreams)
+    private DatabaseFile(StreamSource? source, WalIndex? wal, DatabaseHeader? header, uint pageCount, int maxRowSize,
+        Stream[] ownedStreams)
     {
+        MaxRowSize = maxRowSize;
         _source = source;
         _wal = wal;
         Header = header;
@@ -29,12 +31,15 @@ internal sealed class DatabaseFile : IDisposable
 
     public int PageSize => Header!.PageSize;
 
+    /// <summary>The largest row payload that may be read (<see cref="SqliteDatabaseOptions.MaxRowSize"/>).</summary>
+    public int MaxRowSize { get; }
+
     /// <summary>
     /// Opens a database from streams. Unless <paramref name="leaveOpen"/> is set, the streams are disposed with the
     /// returned object.
     /// </summary>
-    public static async Task<DatabaseFile> OpenAsync(Stream database, Stream? wal, bool leaveOpen,
-        CancellationToken cancellationToken)
+    public static async Task<DatabaseFile> OpenAsync(Stream database, Stream? wal, SqliteDatabaseOptions options,
+        bool leaveOpen, CancellationToken cancellationToken)
     {
         var source = new StreamSource(database, nameof(database));
         var walSource = wal is null ? null : new StreamSource(wal, nameof(wal));
@@ -43,7 +48,7 @@ internal sealed class DatabaseFile : IDisposable
         // Like SQLite, a write-ahead log next to an empty database file is ignored.
         if (source.Length == 0)
         {
-            return new DatabaseFile(null, null, null, 0, owned);
+            return new DatabaseFile(null, null, null, 0, options.MaxRowSize, owned);
         }
 
         var buffer = new byte[DatabaseHeader.Size];
@@ -53,7 +58,7 @@ internal sealed class DatabaseFile : IDisposable
         // Like SQLite, a write-ahead log is used whether or not the header says the database is in WAL mode.
         var walIndex = walSource is null
             ? null
-            : await WalIndex.OpenAsync(walSource, cancellationToken).ConfigureAwait(false);
+            : await WalIndex.OpenAsync(walSource, options.MaxWalSize, cancellationToken).ConfigureAwait(false);
         if (walIndex is null)
         {
             uint pageCount = header.PageCount;
@@ -62,7 +67,7 @@ internal sealed class DatabaseFile : IDisposable
                 pageCount = (uint)Math.Min(uint.MaxValue, source.Length / header.PageSize);
             }
 
-            return new DatabaseFile(source, null, header, pageCount, owned);
+            return new DatabaseFile(source, null, header, pageCount, options.MaxRowSize, owned);
         }
 
         if (walIndex.PageSize != header.PageSize)
@@ -77,7 +82,7 @@ internal sealed class DatabaseFile : IDisposable
             header = DatabaseHeader.Parse(buffer);
         }
 
-        return new DatabaseFile(source, walIndex, header, walIndex.PageCount, owned);
+        return new DatabaseFile(source, walIndex, header, walIndex.PageCount, options.MaxRowSize, owned);
     }
 
     /// <summary>

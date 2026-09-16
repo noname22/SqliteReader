@@ -30,7 +30,7 @@ public class StreamTests
     [Test]
     public async Task OpenFile_WithoutUsingWalFile_ReadsOnlyTheDatabase()
     {
-        await using var database = await SqliteDatabase.OpenAsync(TestData.Path("wal.db"), useWalFile: false);
+        await using var database = await SqliteDatabase.OpenAsync(TestData.Path("wal.db"), new SqliteDatabaseOptions { UseWalFile = false });
 
         Assert.That(database.Tables, Is.Empty);
     }
@@ -38,7 +38,7 @@ public class StreamTests
     [Test]
     public async Task OpenFile_UsingWalFile_IncludesTheLog()
     {
-        await using var database = await SqliteDatabase.OpenAsync(TestData.Path("wal.db"), useWalFile: true);
+        await using var database = await SqliteDatabase.OpenAsync(TestData.Path("wal.db"), new SqliteDatabaseOptions { UseWalFile = true });
 
         Assert.That(database.Tables, Has.Count.EqualTo(2));
     }
@@ -50,7 +50,7 @@ public class StreamTests
         File.Copy(TestData.Path("types.db"), path);
         File.WriteAllBytes(path + "-journal", [0xD9, 0xD5, 0x05, 0xF9, 0x20, 0xA1, 0x63, 0xD7]);
 
-        Assert.ThrowsAsync<NotSupportedException>(() => SqliteDatabase.OpenAsync(path, useWalFile: false));
+        Assert.ThrowsAsync<NotSupportedException>(() => SqliteDatabase.OpenAsync(path, new SqliteDatabaseOptions { UseWalFile = false }));
     }
 
     [Test]

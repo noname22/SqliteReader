@@ -22,7 +22,6 @@ await foreach (SqliteRow row in db.ReadTableAsync("FILE"))
 }
 ```
 
-Pass `useWalFile: false` to `OpenAsync` to read only the database file and ignore a `-wal` file next to it.
 Databases can also be read from any readable, seekable streams, for example in memory:
 
 ```csharp
@@ -32,14 +31,31 @@ await using var db = await SqliteDatabase.OpenStreamAsync(databaseStream, walStr
 The streams are disposed together with the database unless `leaveOpen: true` is passed. `FileStream`s are read
 through their file handle, so several tables can be read at the same time; reads from other streams take turns.
 
+Both methods take an optional `SqliteDatabaseOptions`. The defaults behave like SQLite; the limits are useful when
+reading files from untrusted sources:
+
+```csharp
+var options = new SqliteDatabaseOptions
+{
+    UseWalFile = true,          // OpenAsync: include a -wal file next to the database
+    CheckHotJournal = true,     // OpenAsync: refuse a database with a hot -journal file next to it
+    MaxWalSize = null,          // largest -wal file to read, in bytes (null: no limit)
+    MaxRowSize = 1_000_000_000, // largest row to read, in bytes; also limits single strings and blobs
+};
+await using var db = await SqliteDatabase.OpenAsync("data.db", options);
+```
+
+Exceeding a limit throws `NotSupportedException`. Anyone who can create files next to a database can change what is
+read by placing a `-wal` file there, or prevent opening with a `-journal` file; turn the first two options off if
+that matters.
+
 - Rows are returned in rowid order, or in primary key order for WITHOUT ROWID tables.
 - Supported: all page sizes, UTF-8 and UTF-16 databases, overflow pages, auto-vacuum, INTEGER PRIMARY KEY
   rowid aliases, columns added with `ALTER TABLE ADD COLUMN` (their constant defaults are used), STRICT tables and
   generated columns. VIRTUAL generated columns are not stored in the file and are returned as `null`.
 - Databases in WAL mode are supported: committed transactions in the `-wal` file are included. The log is indexed
   when the database is opened (the `-shm` file is not used), and later changes to it are not seen.
-- Corrupt or malicious files fail with `SqliteFormatException`. Like SQLite, values larger than 1,000,000,000
-  bytes are rejected.
+- Corrupt or malicious files fail with `SqliteFormatException`.
 - The files are opened read-only and no locks are taken, so the database must not be written to or checkpointed
   while it is being read. When opening a file, a hot rollback journal next to it throws `NotSupportedException`;
   open the database once with SQLite to recover it first. `OpenStreamAsync` only sees the streams it is given, so
