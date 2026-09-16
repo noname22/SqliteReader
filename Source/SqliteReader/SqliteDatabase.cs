@@ -7,8 +7,9 @@ namespace SqliteReader;
 /// A read-only SQLite 3 database. Rows are streamed from disk on demand.
 /// </summary>
 /// <remarks>
-/// The database file is opened read-only and no locks are taken, so the file must not be modified while it is
-/// being read. Databases with a non-empty write-ahead log or a hot rollback journal are rejected.
+/// The database file is opened read-only. Committed transactions in a write-ahead log (<c>-wal</c> file) are
+/// included; the log is indexed once when the database is opened. No locks are taken, so the database must not be
+/// written to or checkpointed while it is being read. Databases with a hot rollback journal are rejected.
 /// Instances are thread-safe; several tables may be enumerated concurrently.
 /// </remarks>
 public sealed class SqliteDatabase : IAsyncDisposable, IDisposable
@@ -31,7 +32,7 @@ public sealed class SqliteDatabase : IAsyncDisposable, IDisposable
     /// Opens a database file for reading and loads its schema.
     /// </summary>
     /// <exception cref="SqliteFormatException">The file is not a valid SQLite 3 database.</exception>
-    /// <exception cref="NotSupportedException">The database cannot be read safely without SQLite, for example because of an un-checkpointed write-ahead log.</exception>
+    /// <exception cref="NotSupportedException">The database has a hot rollback journal, or a file format version this reader doesn't know.</exception>
     public static async Task<SqliteDatabase> OpenAsync(string path, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(path);

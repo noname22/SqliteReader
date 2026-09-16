@@ -26,9 +26,11 @@ await foreach (SqliteRow row in db.ReadTableAsync("FILE"))
 - Supported: all page sizes, UTF-8 and UTF-16 databases, overflow pages, auto-vacuum, INTEGER PRIMARY KEY
   rowid aliases, columns added with `ALTER TABLE ADD COLUMN` (their constant defaults are used), STRICT tables and
   generated columns. VIRTUAL generated columns are not stored in the file and are returned as `null`.
-- The file is opened read-only and no locks are taken, so it must not be written to while it is being read.
-  A database with a non-empty write-ahead log (`-wal`) or a hot rollback journal throws `NotSupportedException`.
-  Open it once with SQLite to checkpoint or recover it first.
+- Databases in WAL mode are supported: committed transactions in the `-wal` file are included. The log is indexed
+  when the database is opened (the `-shm` file is not used), and later changes to it are not seen.
+- The files are opened read-only and no locks are taken, so the database must not be written to or checkpointed
+  while it is being read. A database with a hot rollback journal throws `NotSupportedException`; open it once with
+  SQLite to recover it first.
 
 ## Building and testing
 

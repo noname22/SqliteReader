@@ -146,18 +146,52 @@ INSERT INTO "CREATE TABLE fake(x)" VALUES ('ok');
 SQL
 dump_all schema.db
 
-# A database in WAL mode whose log has not been checkpointed. Copies are taken while the connection is open,
-# since sqlite3 checkpoints and deletes the log when it closes. Do not open wal.db with sqlite3 afterwards, for
-# the same reason.
-rm -f wal-source.db*
-sqlite3 wal-source.db <<'SQL'
+# wal_db <name> <page size> <sql>: creates <name>.db with an un-checkpointed <name>.db-wal holding the effects of
+# <sql>. The copies are taken while the connection is open, since sqlite3 checkpoints and deletes the log when it
+# closes. Never open the resulting database with sqlite3, for the same reason. The expected data comes from running
+# the same SQL on a separate database in rollback journal mode.
+wal_db() {
+    local name=$1 pagesize=$2 sql=$3
+    rm -f "$name-source.db"* "$name-reference.db"
+    sqlite3 "$name-source.db" <<SQL
 .output /dev/null
+PRAGMA page_size = $pagesize;
 PRAGMA journal_mode = WAL;
-CREATE TABLE t(x);
-INSERT INTO t VALUES (1), (2), (3);
-.shell cp wal-source.db wal.db && cp wal-source.db-wal wal.db-wal
+PRAGMA wal_autocheckpoint = 0;
+$sql
+.shell cp $name-source.db $name.db && cp $name-source.db-wal $name.db-wal
 SQL
-rm -f wal-source.db*
+    rm -f "$name-source.db"*
+    { echo "PRAGMA page_size = $pagesize;"; echo "$sql"; } | sqlite3 "$name-reference.db" > /dev/null
+    dump_all "$name-reference.db"
+    mv "$name-reference.expected.jsonl" "$name.expected.jsonl"
+    rm -f "$name-reference.db"
+}
+
+# All tables exist only in the log, and the database grows beyond the one page in the main file.
+# The last transaction must stay a single insert of 'last' (WalTests relies on it).
+wal_db wal 1024 "
+CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT, n REAL);
+INSERT INTO t(v, n) SELECT 'first ' || value, value / 4.0 FROM generate_series(1, 300);
+BEGIN;
+UPDATE t SET v = 'updated ' || id WHERE id % 5 = 0;
+DELETE FROM t WHERE id % 7 = 0;
+COMMIT;
+CREATE TABLE w(k TEXT PRIMARY KEY, big TEXT) WITHOUT ROWID;
+INSERT INTO w SELECT 'k' || value, printf('%.*c', 3000, char(65 + value % 26)) FROM generate_series(1, 20);
+INSERT INTO t(v, n) SELECT 'second ' || value, -value FROM generate_series(1, 200);
+INSERT INTO t(v) VALUES ('last');
+"
+
+# After a RESTART checkpoint the next transaction rewrites the start of the log with new salts. Frames from before
+# the checkpoint remain after it and must be ignored, or the deleted rows would reappear.
+wal_db wal-restarted 1024 "
+CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT);
+INSERT INTO t(v) SELECT printf('%.*c', 100, char(97 + value % 26)) FROM generate_series(1, 2000);
+UPDATE t SET v = upper(v) WHERE id % 2 = 0;
+PRAGMA wal_checkpoint(RESTART);
+DELETE FROM t WHERE id BETWEEN 100 AND 300;
+"
 
 # A database in WAL mode that has been checkpointed (no log file remains).
 sqlite3 wal-checkpointed.db <<'SQL'

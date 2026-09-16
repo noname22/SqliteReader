@@ -47,6 +47,18 @@ public class DatabaseTests
     }
 
     [Test]
+    public async Task Open_EmptyFileWithWal_IgnoresTheLog()
+    {
+        string path = Path.Combine(_tempDirectory, "empty.db");
+        File.WriteAllBytes(path, []);
+        File.Copy(TestData.Path("wal.db-wal"), path + "-wal");
+
+        await using var database = await SqliteDatabase.OpenAsync(path);
+
+        Assert.That(database.Tables, Is.Empty);
+    }
+
+    [Test]
     public async Task Read_TruncatedFile_Throws()
     {
         string path = Path.Combine(_tempDirectory, "truncated.db");
@@ -58,10 +70,13 @@ public class DatabaseTests
     }
 
     [Test]
-    public void Open_UncheckpointedWal_ThrowsNotSupported()
+    public async Task Open_UncheckpointedWal_ReadsTablesThatOnlyExistInTheLog()
     {
-        var exception = Assert.ThrowsAsync<NotSupportedException>(() => SqliteDatabase.OpenAsync(TestData.Path("wal.db")));
-        Assert.That(exception!.Message, Does.Contain("write-ahead log"));
+        await using var database = await SqliteDatabase.OpenAsync(TestData.Path("wal.db"));
+
+        Assert.That(database.Tables.Select(t => t.Name), Is.EqualTo(new[] { "t", "w" }));
+        Assert.That((await database.ReadAllAsync("t")).Last()["v"], Is.EqualTo("last"));
+        Assert.That(File.Exists(TestData.Path("wal.db-wal")), Is.True, "the log must be left untouched");
     }
 
     [Test]

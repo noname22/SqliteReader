@@ -16,8 +16,6 @@ internal sealed class DatabaseHeader
 
     public int UsableSize { get; private init; }
 
-    public bool IsWal { get; private init; }
-
     /// <summary>The page count from the header, or 0 if the header value is not valid.</summary>
     public uint PageCount { get; private init; }
 
@@ -41,7 +39,6 @@ internal sealed class DatabaseHeader
             throw new SqliteFormatException($"Invalid page size {pageSize}.");
         }
 
-        byte writeVersion = header[18];
         byte readVersion = header[19];
         if (readVersion is not (1 or 2))
         {
@@ -86,7 +83,6 @@ internal sealed class DatabaseHeader
         {
             PageSize = pageSize,
             UsableSize = usableSize,
-            IsWal = writeVersion == 2 || readVersion == 2,
             PageCount = pageCount,
             TextEncoding = encoding,
         };

@@ -10,7 +10,8 @@ public class ExpectedDataTests
 {
     private static readonly string[] Databases =
     [
-        "types", "utf16le", "utf16be", "multipage", "pagesize65536", "autovacuum", "schema", "wal-checkpointed",
+        "types", "utf16le", "utf16be", "multipage", "pagesize65536", "autovacuum", "schema", "wal-checkpointed", "wal",
+        "wal-restarted",
     ];
 
     [TestCaseSource(nameof(Databases))]
