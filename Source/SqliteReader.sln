@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SqliteReader", "SqliteReader\SqliteReader.csproj", "{FC7807F9-725E-45E1-A33C-5AA75BE9363D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SqliteReader.Tests", "SqliteReader.Tests\SqliteReader.Tests.csproj", "{088B8219-CBAF-49BE-A358-C525F8AC7080}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FC7807F9-725E-45E1-A33C-5AA75BE9363D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FC7807F9-725E-45E1-A33C-5AA75BE9363D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FC7807F9-725E-45E1-A33C-5AA75BE9363D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FC7807F9-725E-45E1-A33C-5AA75BE9363D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{088B8219-CBAF-49BE-A358-C525F8AC7080}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{088B8219-CBAF-49BE-A358-C525F8AC7080}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{088B8219-CBAF-49BE-A358-C525F8AC7080}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{088B8219-CBAF-49BE-A358-C525F8AC7080}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

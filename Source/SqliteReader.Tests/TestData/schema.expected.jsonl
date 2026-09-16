@@ -1,0 +1,27 @@
+{"t":"ipk","r":[-3,["integer",-3],["text","e"]]}
+{"t":"ipk","r":[1,["integer",1],["text","a"]]}
+{"t":"ipk","r":[2,["integer",2],["text","b"]]}
+{"t":"ipk","r":[3,["integer",3],["text","c"]]}
+{"t":"ipk","r":[100,["integer",100],["text","d"]]}
+{"t":"ipk_table_constraint","r":[10,["text","x"],["integer",10]]}
+{"t":"ipk_table_constraint","r":[20,["text","y"],["integer",20]]}
+{"t":"not_alias_desc","r":[1,["integer",5],["text","five"]]}
+{"t":"not_alias_desc","r":[2,["integer",1],["text","one"]]}
+{"t":"not_alias_int","r":[1,["integer",5],["text","five"]]}
+{"t":"not_alias_int","r":[2,["integer",1],["text","one"]]}
+{"t":"odd \"name\"","r":[1,["text","s"],["integer",1],["text","ab"],["text","q"],["integer",3]]}
+{"t":"altered","r":[1,["integer",1],["text","before1"],["integer",-42],["text","it's"],["real","3FF0000000000000"],["null",null],["text","12.5"],["blob","CAFE"],["integer",1],["text","0x10"],["integer",7]]}
+{"t":"altered","r":[2,["integer",2],["text","before2"],["integer",-42],["text","it's"],["real","3FF0000000000000"],["null",null],["text","12.5"],["blob","CAFE"],["integer",1],["text","0x10"],["integer",7]]}
+{"t":"altered","r":[3,["integer",3],["text","after"],["integer",1],["text","c"],["real","4004000000000000"],["text","e"],["text","f"],["blob","00"],["integer",0],["integer",5],["integer",6]]}
+{"t":"generated","r":[1,["integer",1],null,["integer",3],["text","x"],null]}
+{"t":"generated","r":[2,["integer",2],null,["integer",6],["text","y"],null]}
+{"t":"wr","r":[null,["text","a2"],["integer",2],["text","c0"],["null",null]]}
+{"t":"wr","r":[null,["text","a0"],["integer",3],["text","c1"],["blob","03"]]}
+{"t":"wr","r":[null,["text","a1"],["integer",1],["text","C1"],["blob","01"]]}
+{"t":"wr_column_pk","r":[null,["real","4004000000000000"],["text","a"]]}
+{"t":"wr_column_pk","r":[null,["real","3FF0000000000000"],["text","b"]]}
+{"t":"wr_generated","r":[null,["integer",20],null,["text","k1"]]}
+{"t":"wr_generated","r":[null,["integer",10],null,["text","k2"]]}
+{"t":"strict_t","r":[1,["integer",1],["text","1"],["real","3FF0000000000000"],["text","x"]]}
+{"t":"strict_t","r":[2,["integer",2],["real","3FF8000000000000"],["real","400A000000000000"],["text","y"]]}
+{"t":"CREATE TABLE fake(x)","r":[1,["text","ok"]]}
