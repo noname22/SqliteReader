@@ -61,6 +61,28 @@ that matters.
   open the database once with SQLite to recover it first. `OpenStreamAsync` only sees the streams it is given, so
   it can't detect a hot journal.
 
+## Types
+
+Row values are `object?` with one of five .NET types, one per SQLite storage class: `null`, `long`, `double`,
+`string` and `byte[]`. Apart from the `REAL` conversion below, the type of a value is determined by how it is stored
+in the file, not by the column's declared type, so cast it to what you need:
+
+```csharp
+long id = (long)row["id"];
+int count = (int)(long)row["count"]; // all integers are long; unbox first, then narrow
+double price = (double)row["price"];
+string name = (string)row["name"];
+byte[] data = (byte[])row["data"];
+```
+
+- **All integers are `long`**, regardless of declared column type or how many bytes are stored, so a value from a
+  32-bit column must be unboxed as `long` first: `(int)(long)row["count"]`.
+- **`REAL`-affinity columns return integers as `double`**: a value stored as an integer in a `REAL`, `FLOAT` or
+  `DOUBLE PRECISION` column is converted to `double`, so a numeric value there is never a `long`. `NULL` is still
+  `null`, and in non-STRICT tables text or blobs stored there are returned unchanged.
+- No other conversions are made. A `BOOLEAN` column yields `long`, a date column yields `string` (or `long`/`double`,
+  depending on how it was stored), and there are no `DateTime`, `Guid` or similar types.
+
 ## Building and testing
 
 Requires the .NET 8 SDK.
